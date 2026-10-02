@@ -97,7 +97,7 @@ class BleManager extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await device.connect(timeout: const Duration(seconds: 12), autoConnect: false);
+      await device.connect(\n        license: License.nonprofit,\n        timeout: const Duration(seconds: 12),\n        autoConnect: false,\n      );
     } catch (_) {
       if (!device.isConnected) rethrow;
     }
