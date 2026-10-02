@@ -769,7 +769,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _trainingPage() {
     return TrainingPanel(
       gestures: gestures,
+      uiLanguage: widget.uiLanguage,
       currentVector: _currentVector,
+      currentLeft: () => leftWindow.isEmpty ? null : leftWindow.last,
+      currentRight: () => rightWindow.isEmpty ? null : rightWindow.last,
       onSave: (gesture) async {
         final index = gestures.indexWhere(
           (g) => g.id.toLowerCase() == gesture.id.toLowerCase(),
