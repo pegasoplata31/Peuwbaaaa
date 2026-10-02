@@ -41,8 +41,35 @@ class BleManager extends ChangeNotifier {
   final Map<String, StreamSubscription<List<int>>> _valueSubs = {};
   final Map<String, StreamSubscription<BluetoothConnectionState>> _connSubs = {};
 
+  DateTime? _leftLastRx;
+  DateTime? _rightLastRx;
+  DateTime? _leftLastValid;
+  DateTime? _rightLastValid;
+  int _leftNotifications = 0;
+  int _rightNotifications = 0;
+  int _leftValidFrames = 0;
+  int _rightValidFrames = 0;
+
   bool get leftConnected => leftDevice?.isConnected ?? false;
   bool get rightConnected => rightDevice?.isConnected ?? false;
+
+  int notificationCount(HandSide side) =>
+      side == HandSide.left ? _leftNotifications : _rightNotifications;
+
+  int validFrameCount(HandSide side) =>
+      side == HandSide.left ? _leftValidFrames : _rightValidFrames;
+
+  bool receivingBytes(HandSide side) {
+    final last = side == HandSide.left ? _leftLastRx : _rightLastRx;
+    return last != null &&
+        DateTime.now().difference(last).inMilliseconds < 1800;
+  }
+
+  bool receivingValidData(HandSide side) {
+    final last = side == HandSide.left ? _leftLastValid : _rightLastValid;
+    return last != null &&
+        DateTime.now().difference(last).inMilliseconds < 1800;
+  }
 
   Future<void> requestPermissions() async {
     await [
@@ -108,8 +135,16 @@ class BleManager extends ChangeNotifier {
 
     if (side == HandSide.left) {
       leftDevice = device;
+      _leftLastRx = null;
+      _leftLastValid = null;
+      _leftNotifications = 0;
+      _leftValidFrames = 0;
     } else {
       rightDevice = device;
+      _rightLastRx = null;
+      _rightLastValid = null;
+      _rightNotifications = 0;
+      _rightValidFrames = 0;
     }
 
     _connSubs[device.remoteId.str]?.cancel();
@@ -136,12 +171,15 @@ class BleManager extends ChangeNotifier {
       throw Exception('No se encontró la característica BLE del guante.');
     }
 
-    await target.setNotifyValue(true);
     _valueSubs[device.remoteId.str]?.cancel();
-    _valueSubs[device.remoteId.str] = target.onValueReceived.listen((bytes) {
-      final raw = utf8.decode(bytes, allowMalformed: true).trim();
-      _parse(raw, side);
+    final subscription = target.onValueReceived.listen((bytes) {
+      _markNotification(side);
+      _handleNotification(bytes, side);
     });
+    _valueSubs[device.remoteId.str] = subscription;
+    device.cancelWhenDisconnected(subscription);
+
+    await target.setNotifyValue(true);
 
     status = 'Conectado: ${device.platformName}';
     notifyListeners();
@@ -150,12 +188,66 @@ class BleManager extends ChangeNotifier {
   Future<void> connectScanResult(ScanResult r, HandSide side) =>
       connectDevice(r.device, side);
 
+  void _markNotification(HandSide side) {
+    final now = DateTime.now();
+    if (side == HandSide.left) {
+      _leftLastRx = now;
+      _leftNotifications++;
+    } else {
+      _rightLastRx = now;
+      _rightNotifications++;
+    }
+    notifyListeners();
+  }
+
+  void _markValid(HandSide side) {
+    final now = DateTime.now();
+    if (side == HandSide.left) {
+      _leftLastValid = now;
+      _leftValidFrames++;
+    } else {
+      _rightLastValid = now;
+      _rightValidFrames++;
+    }
+    notifyListeners();
+  }
+
+  String _hex(List<int> bytes) => bytes
+      .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+      .join(' ');
+
+  bool _isPrintableAscii(List<int> bytes) {
+    for (final byte in bytes) {
+      final control = byte == 9 || byte == 10 || byte == 13;
+      final printable = byte >= 32 && byte <= 126;
+      if (!control && !printable) return false;
+    }
+    return true;
+  }
+
+  void _handleNotification(List<int> bytes, HandSide side) {
+    if (bytes.isEmpty) return;
+
+    if (!_isPrintableAscii(bytes)) {
+      _packetController.add(BlePacket(
+        raw: '[BINARIO ${bytes.length} B] HEX: ${_hex(bytes)}',
+        side: side,
+      ));
+      return;
+    }
+
+    final raw = utf8.decode(bytes).trim();
+    if (raw.isEmpty) return;
+    _parse(raw, side);
+  }
+
   void _parse(String raw, HandSide sourceSide) {
     if (raw.isEmpty) return;
 
     // El firmware antiguo/procesado puede mandar "VOICE: GRACIAS".
     if (raw.toUpperCase().startsWith('VOICE:')) {
       final word = raw.substring(raw.indexOf(':') + 1).trim();
+      _markValid(sourceSide);
       _packetController.add(BlePacket(
         raw: raw,
         side: sourceSide,
@@ -171,6 +263,7 @@ class BleManager extends ChangeNotifier {
       if (parts.length >= 3) {
         final l = SensorFrame.fromCsv(parts[1]);
         final r = SensorFrame.fromCsv(parts[2]);
+        if (l != null || r != null) _markValid(sourceSide);
         _packetController.add(BlePacket(raw: raw, left: l, right: r));
         return;
       }
@@ -186,6 +279,7 @@ class BleManager extends ChangeNotifier {
         final l = lraw == null ? null : SensorFrame.fromCsv(lraw);
         final r = rraw == null ? null : SensorFrame.fromCsv(rraw);
         if (l != null || r != null) {
+          _markValid(sourceSide);
           _packetController.add(BlePacket(raw: raw, left: l, right: r));
           return;
         }
@@ -204,6 +298,7 @@ class BleManager extends ChangeNotifier {
     }
 
     final frame = SensorFrame.fromCsv(payload);
+    if (frame != null) _markValid(side);
     _packetController.add(BlePacket(
       raw: raw,
       side: side,
