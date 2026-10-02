@@ -1,0 +1,136 @@
+name: Build Guante-De-Voz APK
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Compilar APK Android
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Descargar proyecto
+        uses: actions/checkout@v7
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Verificar Flutter
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Instalar dependencias Flutter
+        run: flutter pub get
+
+      - name: Generar solamente Android sin borrar la app
+        run: |
+          rm -rf /tmp/guante_android
+          flutter create \
+            --platforms=android \
+            --org com.beyondword \
+            --project-name guante_de_voz \
+            /tmp/guante_android
+
+          rm -rf android
+          cp -R /tmp/guante_android/android ./android
+
+      - name: Configurar permisos Bluetooth BLE
+        run: |
+          cat > android/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission
+                  android:name="android.permission.BLUETOOTH_SCAN"
+                  android:usesPermissionFlags="neverForLocation" />
+
+              <uses-permission
+                  android:name="android.permission.BLUETOOTH_CONNECT" />
+
+              <uses-permission
+                  android:name="android.permission.BLUETOOTH"
+                  android:maxSdkVersion="30" />
+
+              <uses-permission
+                  android:name="android.permission.BLUETOOTH_ADMIN"
+                  android:maxSdkVersion="30" />
+
+              <uses-permission
+                  android:name="android.permission.ACCESS_FINE_LOCATION"
+                  android:maxSdkVersion="30" />
+
+              <uses-feature
+                  android:name="android.hardware.bluetooth_le"
+                  android:required="true" />
+
+              <application
+                  android:label="Guante-De-Voz"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:taskAffinity=""
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+
+                      <meta-data
+                          android:name="io.flutter.embedding.android.NormalTheme"
+                          android:resource="@style/NormalTheme" />
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+
+                  </activity>
+
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+
+              </application>
+
+          </manifest>
+          EOF
+
+      - name: Restaurar dependencias
+        run: flutter pub get
+
+      - name: Compilar APK Release
+        run: flutter build apk --release
+
+      - name: Verificar APK
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          test -f build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: Guante-De-Voz-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
