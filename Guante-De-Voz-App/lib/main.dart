@@ -161,32 +161,50 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<SensorFrame> rightWindow = [];
   final List<LogEntry> logs = [];
   List<TrainingGesture> gestures = [];
+  List<double>? restVector;
 
   StreamSubscription<BlePacket>? packetSub;
   Timer? recognizeTimer;
 
   int tab = 0;
-  String language = 'es';
+  String language = 'es-PA';
   String recognized = '—';
   double confidence = 0;
-  String statusMessage = 'Conecta los guantes para comenzar';
+  String? candidateId;
+  DateTime? candidateSince;
+
+  String _t(String es, String en) => widget.uiLanguage == 'en' ? en : es;
 
   static const languages = <String, String>{
-    'es': 'ES',
-    'en': 'EN',
-    'zh': '中文',
-    'fr': 'FR',
-    'pt': 'PT',
-    'de': 'DE',
+    'zh-yue': '中文（粤语）',
+    'zh-cmn': '中文（普通话）',
+    'es-PA': 'Español (Panamá)',
+    'es-MX': 'Español (México)',
+    'es-ES': 'Español (España)',
+    'pt': 'Português',
+    'en': 'English',
+    'fr': 'Français',
+    'de': 'Deutsch',
+    'ar': 'العربية',
+    'ru': 'Русский',
+    'ja': '日本語',
+    'ko': '한국어',
   };
 
   static const locales = <String, String>{
-    'es': 'es-ES',
-    'en': 'en-US',
-    'zh': 'zh-CN',
-    'fr': 'fr-FR',
+    'zh-yue': 'yue-HK',
+    'zh-cmn': 'zh-CN',
+    'es-PA': 'es-PA',
+    'es-MX': 'es-MX',
+    'es-ES': 'es-ES',
     'pt': 'pt-BR',
+    'en': 'en-US',
+    'fr': 'fr-FR',
     'de': 'de-DE',
+    'ar': 'ar-SA',
+    'ru': 'ru-RU',
+    'ja': 'ja-JP',
+    'ko': 'ko-KR',
   };
 
   @override
@@ -196,14 +214,25 @@ class _HomeScreenState extends State<HomeScreen> {
     ble.addListener(_refresh);
     packetSub = ble.packets.listen(_onPacket);
     recognizeTimer = Timer.periodic(
-      const Duration(milliseconds: 180),
+      const Duration(milliseconds: 100),
       (_) => _recognize(),
     );
-    tts.setSpeechRate(.45);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showCalibrationWarning();
+    });
   }
 
   Future<void> _load() async {
     gestures = await storage.load();
+    final prefs = await SharedPreferences.getInstance();
+    final savedRest = prefs.getString('rest_vector');
+    if (savedRest != null) {
+      try {
+        restVector = (jsonDecode(savedRest) as List)
+            .map((e) => (e as num).toDouble())
+            .toList();
+      } catch (_) {}
+    }
     if (mounted) setState(() {});
   }
 
