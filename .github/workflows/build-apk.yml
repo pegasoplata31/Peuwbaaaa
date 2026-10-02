@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - main
-      - master
 
 permissions:
   contents: read
@@ -16,8 +15,11 @@ jobs:
     name: Compilar APK Android
     runs-on: ubuntu-latest
 
-    steps:
+    defaults:
+      run:
+        working-directory: Guante-De-Voz-App
 
+    steps:
       - name: Descargar proyecto
         uses: actions/checkout@v7
 
@@ -33,6 +35,13 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Verificar estructura del proyecto
+        run: |
+          pwd
+          ls -la
+          test -f pubspec.yaml
+          test -f lib/main.dart
+
       - name: Verificar Flutter
         run: |
           flutter --version
@@ -41,7 +50,7 @@ jobs:
       - name: Instalar dependencias Flutter
         run: flutter pub get
 
-      - name: Generar solamente Android sin borrar la app
+      - name: Generar plataforma Android sin sobrescribir la app
         run: |
           rm -rf /tmp/guante_android
           flutter create \
@@ -119,6 +128,9 @@ jobs:
       - name: Restaurar dependencias
         run: flutter pub get
 
+      - name: Analizar proyecto
+        run: flutter analyze
+
       - name: Compilar APK Release
         run: flutter build apk --release
 
@@ -131,6 +143,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Guante-De-Voz-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: Guante-De-Voz-App/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 30
