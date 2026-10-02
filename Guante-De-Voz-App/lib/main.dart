@@ -325,7 +325,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (recognized == id && conf < .98) return;
     recognized = id;
     confidence = conf;
-    statusMessage = 'Seña reconocida';
     if (mounted) setState(() {});
   }
 
