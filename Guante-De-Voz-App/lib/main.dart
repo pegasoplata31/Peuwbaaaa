@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ble_manager.dart';
 import 'models.dart';
@@ -11,36 +14,108 @@ void main() {
   runApp(const GuanteDeVozApp());
 }
 
-class GuanteDeVozApp extends StatelessWidget {
+class GuanteDeVozApp extends StatefulWidget {
   const GuanteDeVozApp({super.key});
+
+  @override
+  State<GuanteDeVozApp> createState() => _GuanteDeVozAppState();
+}
+
+class _GuanteDeVozAppState extends State<GuanteDeVozApp> {
+  bool darkMode = true;
+  String uiLanguage = 'es';
+  double speechRate = 0.45;
+  double speechVolume = 1.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      darkMode = prefs.getBool('dark_mode') ?? true;
+      uiLanguage = prefs.getString('ui_language') ?? 'es';
+      speechRate = prefs.getDouble('speech_rate') ?? 0.45;
+      speechVolume = prefs.getDouble('speech_volume') ?? 1.0;
+    });
+  }
+
+  ThemeData _theme(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+    return ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      scaffoldBackgroundColor:
+          dark ? const Color(0xFF07101F) : const Color(0xFFF4F8FD),
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xFF1DA1F2),
+        brightness: brightness,
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        color: dark ? const Color(0xFF0D1B31) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: dark ? const Color(0xFF0B172A) : const Color(0xFFEDF4FB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setDarkMode(bool value) async {
+    setState(() => darkMode = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('dark_mode', value);
+  }
+
+  Future<void> _setUiLanguage(String value) async {
+    setState(() => uiLanguage = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ui_language', value);
+  }
+
+  Future<void> _setSpeechRate(double value) async {
+    setState(() => speechRate = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('speech_rate', value);
+  }
+
+  Future<void> _setSpeechVolume(double value) async {
+    setState(() => speechVolume = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('speech_volume', value);
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Guante-De-Voz',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF07101F),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1DA1F2),
-          brightness: Brightness.dark,
-        ),
-        cardTheme: const CardThemeData(
-          color: Color(0xFF0D1B31),
-          margin: EdgeInsets.zero,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF0B172A),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-        ),
-        useMaterial3: true,
+      title: 'Beyond Words',
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
+      home: HomeScreen(
+        darkMode: darkMode,
+        uiLanguage: uiLanguage,
+        speechRate: speechRate,
+        speechVolume: speechVolume,
+        onDarkModeChanged: _setDarkMode,
+        onUiLanguageChanged: _setUiLanguage,
+        onSpeechRateChanged: _setSpeechRate,
+        onSpeechVolumeChanged: _setSpeechVolume,
       ),
-      home: const HomeScreen(),
     );
   }
 }
@@ -52,7 +127,27 @@ class LogEntry {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final bool darkMode;
+  final String uiLanguage;
+  final double speechRate;
+  final double speechVolume;
+  final ValueChanged<bool> onDarkModeChanged;
+  final ValueChanged<String> onUiLanguageChanged;
+  final ValueChanged<double> onSpeechRateChanged;
+  final ValueChanged<double> onSpeechVolumeChanged;
+
+  const HomeScreen({
+    super.key,
+    required this.darkMode,
+    required this.uiLanguage,
+    required this.speechRate,
+    required this.speechVolume,
+    required this.onDarkModeChanged,
+    required this.onUiLanguageChanged,
+    required this.onSpeechRateChanged,
+    required this.onSpeechVolumeChanged,
+  });
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
