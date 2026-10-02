@@ -691,23 +691,46 @@ class _HomeScreenState extends State<HomeScreen> {
         Expanded(
           child: _statusCard(
             'Guante izquierdo',
+            HandSide.left,
             ble.leftConnected,
-            leftWindow.isNotEmpty ? 'Recibiendo datos' : 'Sin datos',
+            leftWindow.isNotEmpty,
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: _statusCard(
             'Guante derecho',
+            HandSide.right,
             ble.rightConnected,
-            rightWindow.isNotEmpty ? 'Recibiendo datos' : 'Sin datos',
+            rightWindow.isNotEmpty,
           ),
         ),
       ],
     );
   }
 
-  Widget _statusCard(String title, bool connected, String subtitle) {
+  Widget _statusCard(
+    String title,
+    HandSide side,
+    bool connected,
+    bool hasParsedData,
+  ) {
+    String subtitle;
+    Color iconColor = Colors.grey;
+
+    if (!connected) {
+      subtitle = 'Desconectado';
+    } else if (hasParsedData || ble.receivingValidData(side)) {
+      subtitle = 'Datos válidos recibidos';
+      iconColor = const Color(0xFF54E0D2);
+    } else if (ble.receivingBytes(side)) {
+      subtitle = 'Recibe bytes, pero formato no válido';
+      iconColor = Colors.orange;
+    } else {
+      subtitle = 'Conectado · esperando datos';
+      iconColor = const Color(0xFF8AA3C1);
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -716,15 +739,22 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(
               connected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
-              color: connected ? const Color(0xFF54E0D2) : Colors.grey,
+              color: iconColor,
             ),
             const SizedBox(height: 9),
             Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 3),
             Text(
-              connected ? subtitle : 'Desconectado',
+              subtitle,
               style: const TextStyle(fontSize: 12, color: Color(0xFF91A6C0)),
             ),
+            if (connected) ...[
+              const SizedBox(height: 4),
+              Text(
+                'RX: ${ble.notificationCount(side)} · válidos: ${ble.validFrameCount(side)}',
+                style: const TextStyle(fontSize: 10, color: Color(0xFF7188A6)),
+              ),
+            ],
           ],
         ),
       ),
