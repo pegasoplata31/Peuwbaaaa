@@ -651,7 +651,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 22),
                 DropdownButtonFormField<String>(
-                  value: language,
+                  initialValue: language,
                   isExpanded: true,
                   decoration: InputDecoration(
                     labelText: _t('Idioma de salida', 'Output language'),
