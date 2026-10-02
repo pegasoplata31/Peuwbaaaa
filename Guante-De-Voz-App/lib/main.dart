@@ -449,13 +449,36 @@ class _HomeScreenState extends State<HomeScreen> {
       _bluetoothPage(),
     ];
     return Scaffold(
+      drawer: _settingsDrawer(),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF07101F),
-        titleSpacing: 16,
-        title: Image.asset('assets/logo.png', height: 42),
+        toolbarHeight: 72,
+        titleSpacing: 8,
+        title: Row(
+          children: [
+            Container(
+              width: 150,
+              height: 50,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'H&R',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ],
+        ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 14),
+            padding: const EdgeInsets.only(right: 12),
             child: Center(
               child: _pill(
                 ble.leftConnected && ble.rightConnected
@@ -471,12 +494,121 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: tab,
         onDestinationSelected: (i) => setState(() => tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.translate), label: 'Traducir'),
-          NavigationDestination(icon: Icon(Icons.model_training), label: 'Entrenar'),
-          NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
-          NavigationDestination(icon: Icon(Icons.bluetooth), label: 'BLE'),
+        destinations: [
+          NavigationDestination(
+            icon: const Icon(Icons.translate),
+            label: _t('Traducir', 'Translate'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.add_circle_outline),
+            label: _t('Agregar', 'Add sign'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.terminal),
+            label: _t('Terminal', 'Terminal'),
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.bluetooth),
+            label: 'BLE',
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _settingsDrawer() {
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(18),
+          children: [
+            Text(
+              _t('Configuración', 'Settings'),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 18),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: widget.darkMode,
+              onChanged: widget.onDarkModeChanged,
+              secondary: Icon(
+                widget.darkMode ? Icons.dark_mode : Icons.light_mode,
+              ),
+              title: Text(_t('Modo oscuro', 'Dark mode')),
+              subtitle: Text(_t(
+                'Cambiar entre tema claro y oscuro',
+                'Switch between light and dark theme',
+              )),
+            ),
+            const Divider(),
+            Text(
+              _t('Idioma de la interfaz', 'Interface language'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'es', label: Text('Español')),
+                ButtonSegment(value: 'en', label: Text('English')),
+              ],
+              selected: {widget.uiLanguage},
+              onSelectionChanged: (values) {
+                if (values.isNotEmpty) {
+                  widget.onUiLanguageChanged(values.first);
+                }
+              },
+            ),
+            const SizedBox(height: 22),
+            Text(
+              _t('Velocidad de voz', 'Speech speed'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            Slider(
+              value: widget.speechRate,
+              min: 0.25,
+              max: 0.70,
+              divisions: 9,
+              label: widget.speechRate.toStringAsFixed(2),
+              onChanged: widget.onSpeechRateChanged,
+            ),
+            Text(
+              _t('Volumen', 'Volume'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            Slider(
+              value: widget.speechVolume,
+              min: 0,
+              max: 1,
+              divisions: 10,
+              label: '${(widget.speechVolume * 100).round()}%',
+              onChanged: widget.onSpeechVolumeChanged,
+            ),
+            const Divider(height: 30),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.self_improvement),
+              title: Text(_t(
+                'Guardar postura de reposo',
+                'Save rest position',
+              )),
+              subtitle: Text(
+                restVector == null
+                    ? _t('Aún no configurada', 'Not configured')
+                    : _t('Configurada', 'Configured'),
+              ),
+              onTap: _captureRest,
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.info_outline),
+              title: Text(_t(
+                'Ver aviso de calibración',
+                'Show calibration notice',
+              )),
+              onTap: _showCalibrationWarning,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -508,7 +640,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(
                     fontSize: 42,
                     fontWeight: FontWeight.w800,
-                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -520,18 +651,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(color: Color(0xFF9FB3CC)),
                 ),
                 const SizedBox(height: 22),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: languages.entries.map((e) {
-                    final selected = language == e.key;
-                    return ChoiceChip(
-                      label: Text(e.value),
-                      selected: selected,
-                      onSelected: (_) => setState(() => language = e.key),
-                    );
-                  }).toList(),
+                DropdownButtonFormField<String>(
+                  value: language,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: _t('Idioma de salida', 'Output language'),
+                    prefixIcon: const Icon(Icons.language),
+                  ),
+                  items: languages.entries
+                      .map(
+                        (e) => DropdownMenuItem(
+                          value: e.key,
+                          child: Text(e.value),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setState(() => language = value);
+                  },
                 ),
                 const SizedBox(height: 20),
                 FilledButton.icon(
