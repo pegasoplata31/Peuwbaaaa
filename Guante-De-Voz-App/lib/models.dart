@@ -95,63 +95,90 @@ class TrainingGesture {
   final String id;
   final Map<String, String> translations;
   final List<List<double>> samples;
+  final bool isDynamic;
+  final bool useLeft;
+  final bool useRight;
 
   TrainingGesture({
     required this.id,
     required this.translations,
     required this.samples,
+    this.isDynamic = false,
+    this.useLeft = true,
+    this.useRight = true,
   });
 
-  List<double> get centroid {
-    if (samples.isEmpty) return [];
-    return List<double>.generate(samples.first.length, (i) {
-      return samples.map((s) => s[i]).reduce((a,b)=>a+b) / samples.length;
-    });
-  }
-
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'translations': translations,
-    'samples': samples,
-  };
+        'id': id,
+        'translations': translations,
+        'samples': samples,
+        'isDynamic': isDynamic,
+        'useLeft': useLeft,
+        'useRight': useRight,
+      };
 
   static TrainingGesture fromJson(Map<String, dynamic> json) => TrainingGesture(
-    id: json['id'] as String,
-    translations: Map<String, String>.from(json['translations'] as Map),
-    samples: (json['samples'] as List)
-        .map((e) => (e as List).map((x) => (x as num).toDouble()).toList())
-        .toList(),
-  );
+        id: json['id'] as String,
+        translations: Map<String, String>.from(json['translations'] as Map),
+        samples: (json['samples'] as List)
+            .map((e) => (e as List)
+                .map((x) => (x as num).toDouble())
+                .toList())
+            .toList(),
+        isDynamic: json['isDynamic'] as bool? ?? false,
+        useLeft: json['useLeft'] as bool? ?? true,
+        useRight: json['useRight'] as bool? ?? true,
+      );
 }
 
 class RecognitionResult {
   final TrainingGesture gesture;
   final double distance;
   final double confidence;
+
   RecognitionResult(this.gesture, this.distance, this.confidence);
 }
 
 class GestureMath {
+  static double vectorDistance(List<double> a, List<double> b) {
+    if (a.length != b.length || a.isEmpty) return double.infinity;
+    double sum = 0;
+    for (int i = 0; i < a.length; i++) {
+      final delta = a[i] - b[i];
+      sum += delta * delta;
+    }
+    return math.sqrt(sum / a.length);
+  }
+
   static RecognitionResult? recognize(
     List<double> vector,
     List<TrainingGesture> gestures, {
     double threshold = 0.42,
+    int k = 3,
   }) {
     RecognitionResult? best;
-    for (final g in gestures) {
-      final c = g.centroid;
-      if (c.length != vector.length || c.isEmpty) continue;
-      double sum = 0;
-      for (int i = 0; i < c.length; i++) {
-        final delta = vector[i] - c[i];
-        sum += delta * delta;
-      }
-      final rms = math.sqrt(sum / c.length);
-      final conf = (1.0 - rms / threshold).clamp(0.0, 1.0);
-      if (best == null || rms < best.distance) {
-        best = RecognitionResult(g, rms, conf);
+
+    for (final gesture in gestures) {
+      if (gesture.samples.isEmpty) continue;
+
+      final distances = gesture.samples
+          .where((sample) => sample.length == vector.length)
+          .map((sample) => vectorDistance(vector, sample))
+          .toList()
+        ..sort();
+
+      if (distances.isEmpty) continue;
+
+      final neighbors = distances.take(math.min(k, distances.length)).toList();
+      final mean = neighbors.reduce((a, b) => a + b) / neighbors.length;
+      final score =
+          (1.0 - mean / threshold).clamp(0.0, 1.0).toDouble();
+
+      if (best == null || mean < best.distance) {
+        best = RecognitionResult(gesture, mean, score);
       }
     }
+
     if (best == null || best.distance > threshold) return null;
     return best;
   }
