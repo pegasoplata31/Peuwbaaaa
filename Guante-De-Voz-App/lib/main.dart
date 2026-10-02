@@ -946,14 +946,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class TrainingPanel extends StatefulWidget {
   final List<TrainingGesture> gestures;
+  final String uiLanguage;
   final List<double>? Function() currentVector;
+  final SensorFrame? Function() currentLeft;
+  final SensorFrame? Function() currentRight;
   final Future<void> Function(TrainingGesture) onSave;
   final Future<void> Function(TrainingGesture) onDelete;
 
   const TrainingPanel({
     super.key,
     required this.gestures,
+    required this.uiLanguage,
     required this.currentVector,
+    required this.currentLeft,
+    required this.currentRight,
     required this.onSave,
     required this.onDelete,
   });
@@ -963,161 +969,506 @@ class TrainingPanel extends StatefulWidget {
 }
 
 class _TrainingPanelState extends State<TrainingPanel> {
-  final name = TextEditingController();
-  final translations = <String, TextEditingController>{
-    'es': TextEditingController(),
-    'en': TextEditingController(),
-    'zh': TextEditingController(),
-    'fr': TextEditingController(),
-    'pt': TextEditingController(),
-    'de': TextEditingController(),
+  static const trainingLanguages = <String, String>{
+    'zh-yue': '中文（粤语）',
+    'zh-cmn': '中文（普通话）',
+    'es-PA': 'Español (Panamá)',
+    'es-MX': 'Español (México)',
+    'es-ES': 'Español (España)',
+    'pt': 'Português',
+    'en': 'English',
+    'fr': 'Français',
+    'de': 'Deutsch',
+    'ar': 'العربية',
+    'ru': 'Русский',
+    'ja': '日本語',
+    'ko': '한국어',
   };
+
+  final name = TextEditingController();
+  late final Map<String, TextEditingController> translations = {
+    for (final code in trainingLanguages.keys) code: TextEditingController(),
+  };
+
   final List<List<double>> samples = [];
-  String message = 'Escribe una palabra y realiza la seña.';
+  bool isDynamic = false;
+  bool useLeft = true;
+  bool useRight = true;
+  bool countingDown = false;
+  bool readyToComplete = false;
+  int countdown = 0;
+  String message = '';
+
+  String _t(String es, String en) =>
+      widget.uiLanguage == 'en' ? en : es;
+
+  @override
+  void initState() {
+    super.initState();
+    message = _t(
+      'Escribe una palabra y selecciona el tipo de seña.',
+      'Enter a word and choose the sign type.',
+    );
+  }
 
   @override
   void dispose() {
     name.dispose();
-    for (final c in translations.values) {
-      c.dispose();
+    for (final controller in translations.values) {
+      controller.dispose();
     }
     super.dispose();
   }
 
-  void _capture() {
-    final v = widget.currentVector();
-    if (v == null) {
-      setState(() => message = 'No hay datos recientes de los guantes.');
-      return;
+  List<double>? _selectedVector() {
+    final vector = widget.currentVector();
+    if (vector == null || vector.length < 26) return null;
+
+    final filtered = List<double>.from(vector);
+    if (!useLeft) {
+      for (int i = 0; i < 13; i++) {
+        filtered[i] = 0;
+      }
     }
+    if (!useRight) {
+      for (int i = 13; i < 26; i++) {
+        filtered[i] = 0;
+      }
+    }
+    return filtered;
+  }
+
+  Future<void> _startTrial() async {
     if (name.text.trim().isEmpty) {
-      setState(() => message = 'Primero escribe el nombre de la palabra.');
+      setState(() {
+        message = _t(
+          'Primero escribe el nombre de la seña.',
+          'Enter the sign name first.',
+        );
+      });
       return;
     }
-    if (samples.length >= 10) return;
+
+    if (!useLeft && !useRight) {
+      setState(() {
+        message = _t(
+          'Activa por lo menos un guante.',
+          'Enable at least one glove.',
+        );
+      });
+      return;
+    }
+
+    if (_selectedVector() == null) {
+      setState(() {
+        message = _t(
+          'No hay datos recientes de los guantes.',
+          'There is no recent glove data.',
+        );
+      });
+      return;
+    }
+
     setState(() {
-      samples.add(List<double>.from(v));
+      countingDown = true;
+      readyToComplete = false;
+      countdown = 2;
+      message = _t(
+        'Prepárate para realizar la seña.',
+        'Get ready to perform the sign.',
+      );
+    });
+
+    for (int value = 2; value >= 1; value--) {
+      if (!mounted) return;
+      setState(() => countdown = value);
+      await SystemSound.play(SystemSoundType.click);
+      await Future.delayed(const Duration(seconds: 1));
+    }
+
+    if (!mounted) return;
+    await SystemSound.play(SystemSoundType.click);
+    setState(() {
+      countdown = 0;
+      countingDown = false;
+      readyToComplete = true;
+      message = _t(
+        'Realiza la seña y pulsa “Completar”.',
+        'Perform the sign and tap “Complete”.',
+      );
+    });
+  }
+
+  void _completeTrial() {
+    if (!readyToComplete || samples.length >= 10) return;
+
+    final vector = _selectedVector();
+    if (vector == null) {
+      setState(() {
+        readyToComplete = false;
+        message = _t(
+          'Se perdieron los datos BLE. Intenta esta repetición otra vez.',
+          'BLE data was lost. Try this repetition again.',
+        );
+      });
+      return;
+    }
+
+    SystemSound.play(SystemSoundType.click);
+    setState(() {
+      samples.add(vector);
+      readyToComplete = false;
       message = samples.length < 10
-          ? 'Muestra ${samples.length}/10 guardada. Repite la seña y pulsa Listo.'
-          : '10/10 muestras listas. Guarda la palabra.';
+          ? _t(
+              'Repetición ${samples.length}/10 guardada. Pulsa “Iniciar” para la siguiente.',
+              'Repetition ${samples.length}/10 saved. Tap “Start” for the next one.',
+            )
+          : _t(
+              '10/10 listas. Guarda la nueva seña.',
+              '10/10 complete. Save the new sign.',
+            );
     });
   }
 
   Future<void> _save() async {
     if (samples.length != 10 || name.text.trim().isEmpty) return;
+
     final id = name.text.trim();
     final map = <String, String>{};
-    for (final e in translations.entries) {
-      map[e.key] = e.value.text.trim().isEmpty ? id : e.value.text.trim();
+    for (final entry in translations.entries) {
+      final value = entry.value.text.trim();
+      map[entry.key] = value.isEmpty ? id : value;
     }
+
     await widget.onSave(
-      TrainingGesture(id: id, translations: map, samples: List.from(samples)),
+      TrainingGesture(
+        id: id,
+        translations: map,
+        samples: List<List<double>>.from(samples),
+        isDynamic: isDynamic,
+        useLeft: useLeft,
+        useRight: useRight,
+      ),
     );
+
+    if (!mounted) return;
     setState(() {
       samples.clear();
       name.clear();
-      for (final c in translations.values) c.clear();
-      message = 'Palabra guardada. Puedes entrenar otra.';
+      for (final controller in translations.values) {
+        controller.clear();
+      }
+      readyToComplete = false;
+      message = _t(
+        'Seña guardada correctamente.',
+        'Sign saved successfully.',
+      );
+    });
+  }
+
+  void _reset() {
+    setState(() {
+      samples.clear();
+      countingDown = false;
+      readyToComplete = false;
+      countdown = 0;
+      message = _t('Registro reiniciado.', 'Recording reset.');
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final progress =
+        countingDown ? (2 - countdown) / 2.0 : samples.length / 10.0;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          'Agregar / entrenar palabra',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+        Text(
+          _t('Agregar una nueva seña', 'Add a new sign'),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Cada palabra se registra 10 veces. Después de realizar cada seña, pulsa “Listo”.',
-          style: TextStyle(color: Color(0xFF9FB3CC)),
+        Text(
+          _t(
+            'Cada seña se registra 10 veces. Antes de cada repetición hay una cuenta regresiva de 2 segundos.',
+            'Each sign is recorded 10 times. Every repetition starts with a 2-second countdown.',
+          ),
         ),
         const SizedBox(height: 16),
         TextField(
           controller: name,
-          decoration: const InputDecoration(
-            labelText: 'Palabra / nombre de la seña',
-            hintText: 'Ej. Buenos días',
+          decoration: InputDecoration(
+            labelText: _t('Nombre de la seña', 'Sign name'),
+            hintText: _t('Ej. Buenos días', 'Example: Good morning'),
           ),
-        ),
-        const SizedBox(height: 12),
-        ExpansionTile(
-          tilePadding: EdgeInsets.zero,
-          title: const Text('Traducciones de esta palabra (6 idiomas)'),
-          subtitle: const Text(
-            'Si dejas un campo vacío, se usará el nombre original.',
-            style: TextStyle(fontSize: 12),
-          ),
-          children: [
-            _langField('Español', translations['es']!),
-            _langField('English', translations['en']!),
-            _langField('中文', translations['zh']!),
-            _langField('Français', translations['fr']!),
-            _langField('Português', translations['pt']!),
-            _langField('Deutsch', translations['de']!),
-          ],
         ),
         const SizedBox(height: 14),
-        LinearProgressIndicator(value: samples.length / 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              label: Text(_t('Estática', 'Static')),
+              selected: !isDynamic,
+              onSelected: (_) => setState(() => isDynamic = false),
+            ),
+            ChoiceChip(
+              label: Text(_t('Dinámica · beta', 'Dynamic · beta')),
+              selected: isDynamic,
+              onSelected: (_) => setState(() => isDynamic = true),
+            ),
+          ],
+        ),
         const SizedBox(height: 8),
         Text(
-          '${samples.length}/10 grabaciones',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontWeight: FontWeight.w700),
+          isDynamic
+              ? _t(
+                  'Modo dinámico: se muestran los datos de movimiento en tiempo real. La comparación DTW se añadirá en una fase posterior.',
+                  'Dynamic mode: motion data is shown in real time. DTW comparison will be added in a later phase.',
+                )
+              : _t(
+                  'Modo estático: se priorizan los dedos, Pitch y Roll.',
+                  'Static mode: fingers, Pitch and Roll are prioritized.',
+                ),
+          style: const TextStyle(fontSize: 12),
         ),
         const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: samples.length < 10 ? _capture : null,
-          icon: const Icon(Icons.check_circle),
-          label: const Text('Listo — guardar esta prueba'),
+        Row(
+          children: [
+            Expanded(
+              child: CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: useLeft,
+                onChanged: (value) =>
+                    setState(() => useLeft = value ?? true),
+                title: Text(_t('Izquierdo', 'Left')),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ),
+            Expanded(
+              child: CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: useRight,
+                onChanged: (value) =>
+                    setState(() => useRight = value ?? true),
+                title: Text(_t('Derecho', 'Right')),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ),
+          ],
+        ),
+        if (isDynamic) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _telemetryMini(
+                  _t('Izquierda', 'Left'),
+                  widget.currentLeft(),
+                  useLeft,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _telemetryMini(
+                  _t('Derecha', 'Right'),
+                  widget.currentRight(),
+                  useRight,
+                ),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 18),
+        Center(
+          child: SizedBox(
+            width: 118,
+            height: 118,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 108,
+                  height: 108,
+                  child: CircularProgressIndicator(
+                    value: progress,
+                    strokeWidth: 9,
+                  ),
+                ),
+                Text(
+                  countingDown
+                      ? '$countdown'
+                      : '${samples.length}/10',
+                  style: const TextStyle(
+                    fontSize: 23,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: countingDown ||
+                        readyToComplete ||
+                        samples.length >= 10
+                    ? null
+                    : _startTrial,
+                icon: const Icon(Icons.play_arrow),
+                label: Text(_t('Iniciar', 'Start')),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: readyToComplete ? _completeTrial : null,
+                icon: const Icon(Icons.check),
+                label: Text(_t('Completar', 'Complete')),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          onPressed: samples.length == 10 ? _save : null,
-          icon: const Icon(Icons.save),
-          label: const Text('Guardar nueva palabra'),
+          onPressed: samples.isEmpty ? null : _reset,
+          icon: const Icon(Icons.restart_alt),
+          label: Text(_t('Reiniciar registro', 'Reset recording')),
         ),
         const SizedBox(height: 10),
         Text(
           message,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: Color(0xFF54E0D2)),
+          style: const TextStyle(
+            color: Color(0xFF38BEC6),
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 14),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: Text(_t(
+            'Traducciones de la seña',
+            'Sign translations',
+          )),
+          subtitle: Text(_t(
+            'Opcional. Si un campo queda vacío se usa el nombre original.',
+            'Optional. Empty fields use the original sign name.',
+          )),
+          children: trainingLanguages.entries
+              .map(
+                (entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TextField(
+                    controller: translations[entry.key],
+                    decoration: InputDecoration(labelText: entry.value),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: samples.length == 10 ? _save : null,
+          icon: const Icon(Icons.save),
+          label: Text(_t('Guardar nueva seña', 'Save new sign')),
+        ),
+        const SizedBox(height: 26),
         const Divider(),
         const SizedBox(height: 12),
         Text(
-          'Palabras entrenadas (${widget.gestures.length})',
+          _t(
+            'Señas disponibles (${widget.gestures.length})',
+            'Available signs (${widget.gestures.length})',
+          ),
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 8),
         if (widget.gestures.isEmpty)
-          const Text(
-            'No hay palabras entrenadas todavía.',
-            style: TextStyle(color: Color(0xFF9FB3CC)),
-          ),
-        ...widget.gestures.map((g) => Card(
-              child: ListTile(
-                title: Text(g.id),
-                subtitle: Text('${g.samples.length} muestras'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => widget.onDelete(g),
-                ),
+          Text(_t(
+            'Todavía no hay señas guardadas.',
+            'No saved signs yet.',
+          )),
+        ...widget.gestures.map(
+          (gesture) => Card(
+            child: ListTile(
+              leading: Icon(
+                gesture.isDynamic
+                    ? Icons.waves
+                    : Icons.pan_tool_outlined,
               ),
-            )),
+              title: Text(gesture.id),
+              subtitle: Text(
+                '${gesture.samples.length} ${_t('muestras', 'samples')} · '
+                '${gesture.isDynamic ? _t('Dinámica', 'Dynamic') : _t('Estática', 'Static')}',
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => widget.onDelete(gesture),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _langField(String label, TextEditingController controller) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: TextField(
-          controller: controller,
-          decoration: InputDecoration(labelText: label),
+  Widget _telemetryMini(
+    String title,
+    SensorFrame? frame,
+    bool enabled,
+  ) {
+    return Opacity(
+      opacity: enabled ? 1 : 0.35,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: frame == null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('—'),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(frame.fingers.map((e) => e.round()).join()),
+                    Text(
+                      'P ${frame.pitch.toStringAsFixed(1)}° · '
+                      'R ${frame.roll.toStringAsFixed(1)}°',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    Text(
+                      'A ${frame.ax.toStringAsFixed(1)} '
+                      '${frame.ay.toStringAsFixed(1)} '
+                      '${frame.az.toStringAsFixed(1)}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    Text(
+                      'G ${frame.gx.toStringAsFixed(1)} '
+                      '${frame.gy.toStringAsFixed(1)} '
+                      '${frame.gz.toStringAsFixed(1)}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ],
+                ),
         ),
-      );
+      ),
+    );
+  }
 }
