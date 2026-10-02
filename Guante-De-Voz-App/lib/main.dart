@@ -291,8 +291,32 @@ class _HomeScreenState extends State<HomeScreen> {
     if (gestures.isEmpty) return;
     final v = _currentVector();
     if (v == null) return;
+
     final result = GestureMath.recognize(v, gestures);
-    if (result != null && result.confidence >= .35) {
+    if (result == null || result.confidence < .35) {
+      candidateId = null;
+      candidateSince = null;
+      return;
+    }
+
+    if (restVector != null && restVector!.length == v.length) {
+      final restDistance = GestureMath.vectorDistance(v, restVector!);
+      if (restDistance <= result.distance * 1.05) {
+        candidateId = null;
+        candidateSince = null;
+        return;
+      }
+    }
+
+    final now = DateTime.now();
+    if (candidateId != result.gesture.id) {
+      candidateId = result.gesture.id;
+      candidateSince = now;
+      return;
+    }
+
+    if (candidateSince != null &&
+        now.difference(candidateSince!).inMilliseconds >= 300) {
       _acceptWord(result.gesture.id, result.confidence);
     }
   }
@@ -315,7 +339,13 @@ class _HomeScreenState extends State<HomeScreen> {
   String get translated {
     if (recognized == '—') return '—';
     final g = currentGesture;
-    if (g != null) return g.translations[language] ?? g.id;
+    if (g != null) {
+      final exact = g.translations[language];
+      if (exact != null && exact.trim().isNotEmpty) return exact;
+      if (language.startsWith('es-')) return g.translations['es'] ?? g.id;
+      if (language.startsWith('zh-')) return g.translations['zh'] ?? g.id;
+      return g.translations[language] ?? g.id;
+    }
     return builtInTranslation(recognized, language);
   }
 
@@ -340,8 +370,64 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _speak() async {
     if (translated == '—') return;
-    await tts.setLanguage(locales[language] ?? 'es-ES');
+    await tts.setLanguage(locales[language] ?? 'es-PA');
+    await tts.setSpeechRate(widget.speechRate);
+    await tts.setVolume(widget.speechVolume);
     await tts.speak(translated);
+  }
+
+  Future<void> _captureRest() async {
+    final v = _currentVector();
+    if (v == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_t(
+            'Conecta los guantes y mantén las manos relajadas.',
+            'Connect the gloves and keep your hands relaxed.',
+          )),
+        ),
+      );
+      return;
+    }
+
+    restVector = List<double>.from(v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('rest_vector', jsonEncode(restVector));
+
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_t(
+          'Postura de reposo guardada.',
+          'Rest position saved.',
+        )),
+      ),
+    );
+  }
+
+  Future<void> _showCalibrationWarning() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.back_hand_outlined),
+        title: Text(_t('Calibración inicial', 'Initial calibration')),
+        content: Text(
+          _t(
+            'Durante la calibración, relaja la mano de forma natural y luego forma un puño suavemente. No aprietes con fuerza, porque puede alterar los valores de flexión y reducir la precisión.',
+            'During calibration, relax your hand naturally and then make a gentle fist. Do not squeeze hard because it can alter the flex values and reduce accuracy.',
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(_t('Entendido', 'Got it')),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
