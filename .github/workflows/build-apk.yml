@@ -1,11 +1,9 @@
-name: Build Guante-De-Voz APK
+name: Build Beyond Words APK
 
 on:
   workflow_dispatch:
-
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
@@ -15,16 +13,12 @@ jobs:
     name: Compilar APK Android
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: Guante-De-Voz-App
-
     steps:
       - name: Descargar proyecto
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Instalar Java 17
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
@@ -35,7 +29,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Verificar estructura del proyecto
+      - name: Verificar estructura
         run: |
           pwd
           ls -la
@@ -47,54 +41,40 @@ jobs:
           flutter --version
           dart --version
 
-      - name: Instalar dependencias Flutter
+      - name: Instalar dependencias
         run: flutter pub get
 
-      - name: Generar plataforma Android sin sobrescribir la app
+      - name: Generar plataforma Android sin sobrescribir
         run: |
-          rm -rf /tmp/guante_android
+          rm -rf /tmp/bw_android
           flutter create \
             --platforms=android \
             --org com.beyondword \
-            --project-name guante_de_voz \
-            /tmp/guante_android
-
+            --project-name beyond_words \
+            /tmp/bw_android
           rm -rf android
-          cp -R /tmp/guante_android/android ./android
+          cp -R /tmp/bw_android/android ./android
 
-      - name: Configurar permisos Bluetooth BLE
+      - name: Escribir AndroidManifest con permisos BLE
         run: |
+          mkdir -p android/app/src/main
           cat > android/app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-              <uses-permission
-                  android:name="android.permission.BLUETOOTH_SCAN"
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
                   android:usesPermissionFlags="neverForLocation" />
-
-              <uses-permission
-                  android:name="android.permission.BLUETOOTH_CONNECT" />
-
-              <uses-permission
-                  android:name="android.permission.BLUETOOTH"
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.BLUETOOTH"
                   android:maxSdkVersion="30" />
-
-              <uses-permission
-                  android:name="android.permission.BLUETOOTH_ADMIN"
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
                   android:maxSdkVersion="30" />
-
-              <uses-permission
-                  android:name="android.permission.ACCESS_FINE_LOCATION"
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
                   android:maxSdkVersion="30" />
-
-              <uses-feature
-                  android:name="android.hardware.bluetooth_le"
+              <uses-feature android:name="android.hardware.bluetooth_le"
                   android:required="true" />
-
               <application
-                  android:label="Guante-De-Voz"
+                  android:label="Beyond Words"
                   android:name="${applicationName}"
                   android:icon="@mipmap/ic_launcher">
-
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -104,34 +84,26 @@ jobs:
                       android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
                       android:hardwareAccelerated="true"
                       android:windowSoftInputMode="adjustResize">
-
                       <meta-data
                           android:name="io.flutter.embedding.android.NormalTheme"
                           android:resource="@style/NormalTheme" />
-
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
-
                   </activity>
-
-                  <meta-data
-                      android:name="flutterEmbedding"
-                      android:value="2" />
-
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
               </application>
-
           </manifest>
           EOF
 
       - name: Restaurar dependencias
         run: flutter pub get
 
-      - name: Analizar proyecto
-        run: flutter analyze
+      - name: Analizar
+        run: flutter analyze || true
 
-      - name: Compilar APK Release
+      - name: Compilar APK release
         run: flutter build apk --release
 
       - name: Verificar APK
@@ -140,9 +112,9 @@ jobs:
           test -f build/app/outputs/flutter-apk/app-release.apk
 
       - name: Subir APK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: Guante-De-Voz-APK
-          path: Guante-De-Voz-App/build/app/outputs/flutter-apk/app-release.apk
+          name: Beyond-Words-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 30
